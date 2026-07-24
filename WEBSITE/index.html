@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Map Motion Studio — Cartography, set in motion.</title>
+<meta name="description" content="Map Motion Studio — a studio for geospatial storytelling and broadcast motion design." />
+<meta name="referrer" content="strict-origin-when-cross-origin" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+  /* ============================================
+     TOKENS
+     ============================================ */
+  :root{
+    --bg: #0B0E12;
+    --bg-elevated: #12161C;
+    --bg-elevated-2: #171C24;
+    --ink: #EDEFF2;
+    --muted: #8A93A3;
+    --muted-2: #5C6472;
+    --hairline: rgba(237,239,242,0.09);
+    --amber: #E8A33D;
+    --amber-dim: rgba(232,163,61,0.35);
+    --teal: #4FD1C5;
+    --teal-dim: rgba(79,209,197,0.35);
+    --radius-lg: 16px;
+    --radius-md: 12px;
+    --radius-sm: 8px;
+    --font-display: 'Space Grotesk', sans-serif;
+    --font-body: 'Inter', sans-serif;
+    --font-mono: 'IBM Plex Mono', monospace;
+    --ease: cubic-bezier(.22,.61,.36,1);
+  }
+
+  *{ box-sizing: border-box; }
+  html{ scroll-behavior: smooth; }
+  body{
+    margin:0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  img,svg{ display:block; max-width:100%; }
+  a{ color:inherit; text-decoration:none; }
+  button{ font-family: inherit; cursor:pointer; }
+  ::selection{ background: var(--amber); color:#0B0E12; }
+
+  :focus-visible{
+    outline: 2px solid var(--amber);
+    outline-offset: 3px;
+  }
+
+  /* ambient grain overlay */
+  .grain{
+    position: fixed; inset:0; z-index: 500; pointer-events:none;
+    opacity: .045; mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  }
+
+  /* ============================================
+     NAV
+     ============================================ */
+  .nav{
+    position: fixed; top:0; left:0; right:0; z-index: 300;
+    display:flex; align-items:center; justify-content:space-between;
+    padding: 22px clamp(20px, 4vw, 56px);
+    background: linear-gradient(to bottom, rgba(11,14,18,.85), transparent);
+  }
+  .nav-brand{ display:flex; align-items:center; gap:10px; }
+  .nav-mark{ width:26px; height:26px; flex-shrink:0; }
+  .nav-word{ font-family: var(--font-display); font-weight:600; font-size:15px; letter-spacing: -0.01em; }
+  .nav-links{ display:flex; align-items:center; gap:32px; }
+  .nav-links a{
+    font-size: 13px; color: var(--muted); font-weight:500;
+    letter-spacing: .01em; transition: color .25s var(--ease);
+  }
+  .nav-links a:hover{ color: var(--ink); }
+  .nav-cta{
+    font-family: var(--font-mono);
+    font-size: 12px; padding: 9px 16px; border-radius: 100px;
+    border: 1px solid var(--hairline); color: var(--ink);
+    transition: border-color .25s var(--ease), background .25s var(--ease);
+  }
+  .nav-cta:hover{ border-color: var(--amber); background: rgba(232,163,61,.08); }
+  .nav-links-inner{ display:flex; gap:32px; }
+  @media (max-width: 720px){
+    .nav-links-inner{ display:none; }
+  }
+
+  /* ============================================
+     HERO — pinned scroll-morph section
+     ============================================ */
+  .hero{
+    position: relative;
+    height: 340vh; /* scroll distance available to scrub through 3 states */
+  }
+  @media (max-width: 720px){
+    .hero{ height: 260vh; }
+  }
+  .hero-pin{
+    position: sticky;
+    top:0;
+    height: 100vh;
+    overflow: hidden;
+    display:flex; align-items:center; justify-content:center;
+    background:
+      radial-gradient(ellipse 80% 60% at 50% 40%, rgba(232,163,61,.05), transparent 60%),
+      var(--bg);
+  }
+
+  /* faint topographic contour backdrop */
+  .contour-bg{
+    position:absolute; inset:-10%; z-index:0; opacity:.35; pointer-events:none;
+    background-image: repeating-radial-gradient(circle at 22% 30%, rgba(237,239,242,.05) 0px, rgba(237,239,242,.05) 1px, transparent 2px, transparent 34px),
+                       repeating-radial-gradient(circle at 78% 68%, rgba(237,239,242,.04) 0px, rgba(237,239,242,.04) 1px, transparent 2px, transparent 46px);
+  }
+
+  /* ---- cards field (UPDATED FLOATING LOGIC) ---- */
+  .cards-field{
+    position:absolute; inset:0; z-index:1;
+    transform-origin: center center;
+    transition: filter 0.8s var(--ease), opacity 0.8s var(--ease), transform 0.8s var(--ease);
+    will-change: filter, opacity, transform;
+  }
+  /* NEW: Blurs and dulls the background when scrolled to video states */
+  .cards-field.is-dulled {
+    filter: blur(8px);
+    opacity: 0.25;
+    transform: scale(0.96);
+  }
+
+  @keyframes drift {
+    0%, 100% { transform: translateY(-3%) rotate(-2deg); }
+    50% { transform: translateY(3%) rotate(2deg); }
+  }
+  .parallax-wrapper {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    will-change: transform;
+  }
+  .drifter {
+    will-change: transform;
+  }
+  .card-inner {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--hairline);
+    background: rgba(11, 14, 18, 0.85); /* matches theme --bg */
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    cursor: pointer;
+    transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.4s var(--ease), border-color 0.4s var(--ease);
+    pointer-events: auto;
+  }
+  .card-inner:hover {
+    transform: scale(1.05) translateY(-5px);
+    box-shadow: 0 0 30px var(--amber-dim), 0 10px 40px rgba(0,0,0,0.6);
+    border-color: rgba(232, 163, 61, 0.4);
+  }
+  .card-img-wrap {
+    position: relative;
+    height: 70%;
+    width: 100%;
+    overflow: hidden;
+    background: #000;
+  }
+  .card-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.7s var(--ease), filter 0.7s var(--ease);
+  }
+  .card-inner:hover .card-img {
+    transform: scale(1.1);
+    filter: brightness(1.1);
+  }
+  .card-badge {
+    position: absolute; right: 8px; top: 8px; z-index: 10;
+    display: flex; align-items: center; gap: 4px;
+    border-radius: 4px; background: rgba(0,0,0,0.6);
+    padding: 2px 6px; font-size: 9px; font-weight: 500;
+    letter-spacing: 0.05em; color: var(--amber);
+    backdrop-filter: blur(6px); border: 1px solid var(--hairline);
+    font-family: var(--font-mono);
+  }
+  .card-badge svg { width:8px; height:8px; fill: var(--amber); }
+  .card-cap-bar {
+    display: flex; height: 30%; flex-direction: column;
+    justify-content: center; padding: 0 12px;
+  }
+  .card-title {
+    font-size: 11px; font-weight: 500; color: var(--ink);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    font-family: var(--font-body);
+  }
+  .card-subtitle {
+    font-size: 9.5px; color: var(--muted);
+    font-family: var(--font-mono); margin-top: 2px;
+  }
+  .card-inner-shadow {
+    position: absolute; inset: 0; pointer-events: none;
+    box-shadow: inset 0 0 20px rgba(0,0,0,0.6);
+  }
+
+  /* ---- old tiles kept for the center state morphs ---- */
+  .tile-map-1{ background: repeating-radial-gradient(circle at 30% 35%, var(--amber-dim) 0px, var(--amber-dim) 1.5px, transparent 2.5px, transparent 13px), linear-gradient(160deg,#1c3350,#0b1a2c); }
+  .tile-motion-1{ background: conic-gradient(from 210deg at 30% 30%, #E8A33D, #4FD1C5, #7C6FE8, #E8A33D); }
+  /* (other tiles omitted here for brevity as they were only used in the old floating cards, but retaining the ones used in center state) */
+
+  /* ---- center content states ---- */
+  .hero-center{
+    position:relative; z-index:2;
+    display:flex; align-items:center; justify-content:center;
+    text-align:center;
+    width: min(94vw, 980px);
+    height: min(74vh, 580px);
+    pointer-events: none; /* Let clicks pass through to cards */
+  }
+  .state{
+    position:absolute; inset:0;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    opacity:0; pointer-events:none;
+    transform: scale(.96);
+    transition: opacity .6s var(--ease), transform .6s var(--ease);
+  }
+  .state.is-active{ opacity:1; pointer-events:auto; transform: scale(1); }
+
+  .eyebrow{
+    font-family: var(--font-mono); font-size: 12px; letter-spacing:.14em;
+    color: var(--muted); text-transform: uppercase; margin: 0 0 18px;
+  }
+  .eyebrow .dot{ color: var(--amber); }
+
+  .wordmark{
+    font-family: var(--font-display); font-weight:600;
+    font-size: clamp(40px, 7.4vw, 92px);
+    line-height: .98; letter-spacing:-0.02em; margin:0;
+    text-shadow: 0 0 40px rgba(237,239,242,0.15); /* added subtle glow */
+  }
+  .w-map{ color: var(--ink); }
+  .w-motion{ color: var(--amber); font-style: italic; font-weight:500; }
+  .w-studio{ color: var(--muted); font-weight:400; }
+
+  .tagline{
+    font-family: var(--font-body); font-size: clamp(14px,1.6vw,17px);
+    color: var(--muted); margin: 22px 0 0; max-width: 480px;
+  }
+
+  .video-thumb{
+    position:relative;
+    width: min(92vw, 920px);
+    aspect-ratio: 16/9;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--hairline);
+    overflow:hidden;
+    background: var(--bg-elevated);
+    display:flex; align-items:center; justify-content:center;
+  }
+  .video-thumb .thumb-bg{
+    position:absolute; inset:0;
+    width:100%; height:100%;
+    object-fit: cover;
+  }
+  .video-thumb .play-icon{
+    position:relative; z-index:2;
+    width:64px; height:64px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    background: rgba(11,14,18,.5); backdrop-filter: blur(8px);
+    border: 1px solid rgba(237,239,242,.25);
+    font-size: 18px; color:var(--ink);
+    transition: transform .3s var(--ease), background .3s var(--ease);
+  }
+  .video-thumb:hover .play-icon{ transform: scale(1.08); background: rgba(232,163,61,.85); color:#0B0E12; }
+  .video-label{
+    position:absolute; left:16px; bottom:14px; z-index:2;
+    font-family: var(--font-mono); font-size:12px;
+    background: rgba(11,14,18,.6); backdrop-filter: blur(6px);
+    padding: 6px 10px; border-radius:6px;
+  }
+
+  /* ---- legend / signature scroll gauge ---- */
+  .legend{
+    position:absolute; z-index:3; right: clamp(14px, 3vw, 40px);
+    top:50%; transform: translateY(-50%);
+    display:flex; flex-direction:column; gap:22px;
+    padding-left: 16px;
+  }
+  .legend-track{
+    position:absolute; left:0; top:2px; bottom:2px; width:1px;
+    background: var(--hairline);
+  }
+  .scan-line{
+    position:absolute; left:-3px; top:0; width:7px; height:7px;
+    border-radius:50%; background: var(--amber);
+    box-shadow: 0 0 12px 2px var(--amber-dim);
+  }
+  .legend-item{
+    display:flex; align-items:center; gap:9px;
+    font-family: var(--font-mono); font-size:10.5px; color: var(--muted-2);
+    transition: color .3s var(--ease);
+  }
+  .legend-item .tick{ width:5px; height:5px; border-radius:50%; background: var(--muted-2); transition: background .3s var(--ease), box-shadow .3s var(--ease); }
+  .legend-item.is-active{ color: var(--ink); }
+  .legend-item.is-active .tick{ background: var(--amber); box-shadow: 0 0 8px 1px var(--amber-dim); }
+  @media (max-width: 720px){ .legend{ display:none; } }
+
+  .coords-readout{
+    position:absolute; left: clamp(14px,3vw,40px); bottom: 24px; z-index:3;
+    font-family: var(--font-mono); font-size: 10.5px; color: var(--muted-2);
+    display:flex; align-items:center; gap:7px;
+  }
+  .coords-readout .live-dot{ width:6px; height:6px; border-radius:50%; background: var(--teal); box-shadow: 0 0 8px 1px var(--teal-dim); animation: pulse 2.4s ease-in-out infinite; }
+  @keyframes pulse{ 0%,100%{ opacity:1; } 50%{ opacity:.35; } }
+  @media (max-width: 720px){ .coords-readout{ display:none; } }
+
+  .scroll-cue{
+    position:absolute; z-index:3; bottom:30px; left:50%; transform:translateX(-50%);
+    font-family: var(--font-mono); font-size:10.5px; color: var(--muted-2);
+    display:flex; flex-direction:column; align-items:center; gap:8px;
+    transition: opacity .4s var(--ease);
+  }
+  .scroll-cue .line{ width:1px; height:26px; background: linear-gradient(to bottom, var(--muted-2), transparent); animation: scrollCue 1.8s ease-in-out infinite; }
+  @keyframes scrollCue{ 0%{ transform: scaleY(0); transform-origin: top;} 50%{ transform: scaleY(1); transform-origin: top;} 51%{ transform-origin: bottom;} 100%{ transform: scaleY(0); transform-origin:bottom; } }
+
+  /* ============================================
+     WORK / PORTFOLIO
+     ============================================ */
+  .section{ padding: 120px clamp(20px,5vw,64px); max-width: 1280px; margin: 0 auto; }
+  .section-head{ margin-bottom: 56px; max-width: 620px; }
+  .section-head h2{
+    font-family: var(--font-display); font-weight:600;
+    font-size: clamp(28px,3.4vw,42px); letter-spacing:-0.01em; margin: 10px 0 0;
+  }
+  .section-head p{ color: var(--muted); font-size:15px; margin: 14px 0 0; line-height:1.6; }
+
+  .filters{ display:flex; gap:10px; margin: 32px 0 40px; }
+  .filter-btn{
+    font-family: var(--font-mono); font-size:12px; padding: 8px 15px; border-radius: 100px;
+    border:1px solid var(--hairline); color: var(--muted); background:transparent;
+    transition: all .25s var(--ease);
+  }
+  .filter-btn.is-active, .filter-btn:hover{ color: var(--bg); background: var(--ink); border-color: var(--ink); }
+
+  .work-grid{
+    display:grid; grid-template-columns: repeat(3, 1fr); gap: 26px;
+  }
+  @media (max-width: 980px){ .work-grid{ grid-template-columns: repeat(2,1fr); } }
+  @media (max-width: 620px){ .work-grid{ grid-template-columns: 1fr; } }
+
+  .work-card{
+    border-radius: var(--radius-lg); overflow:hidden; border:1px solid var(--hairline);
+    background: var(--bg-elevated);
+    transition: transform .4s var(--ease), border-color .4s var(--ease);
+  }
+  .work-card:hover{ transform: translateY(-4px); border-color: rgba(237,239,242,.2); }
+  .work-thumb{ position:relative; aspect-ratio: 16/10; }
+  .work-thumb .play-icon-sm{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    opacity:0; transition: opacity .3s var(--ease);
+  }
+  .work-card:hover .play-icon-sm{ opacity:1; }
+  .play-icon-sm span{
+    width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+    background: rgba(11,14,18,.55); backdrop-filter: blur(6px); border:1px solid rgba(237,239,242,.3);
+    font-size:14px;
+  }
+  .work-meta{ padding: 16px 18px 20px; }
+  .work-cat{ font-family: var(--font-mono); font-size:10.5px; color: var(--amber); text-transform:uppercase; letter-spacing:.08em; }
+  .work-title{ font-family: var(--font-display); font-size:17px; font-weight:600; margin: 8px 0 4px; }
+  .work-client{ font-size:13px; color: var(--muted); }
+
+  /* ============================================
+     ABOUT
+     ============================================ */
+  .about-grid{ display:grid; grid-template-columns: 1.1fr .9fr; gap: 64px; align-items:start; }
+  @media (max-width: 820px){ .about-grid{ grid-template-columns:1fr; gap:36px; } }
+  .about-copy p{ color: var(--muted); font-size:15.5px; line-height:1.75; margin:0 0 16px; }
+  .services{ list-style:none; margin:0; padding:0; border-top:1px solid var(--hairline); }
+  .services li{
+    padding: 18px 0; border-bottom:1px solid var(--hairline);
+    display:flex; align-items:center; justify-content:space-between;
+    font-family: var(--font-display); font-size:16px;
+  }
+  .services li span{ font-family: var(--font-mono); font-size:11px; color: var(--muted-2); }
+
+  /* ============================================
+     FOOTER
+     ============================================ */
+  footer{
+    padding: 90px clamp(20px,5vw,64px) 40px;
+    border-top:1px solid var(--hairline);
+  }
+  .footer-cta{ font-family: var(--font-display); font-weight:600; font-size: clamp(30px,4.6vw,58px); letter-spacing:-0.02em; margin:0 0 34px; max-width:820px; }
+  .footer-cta em{ color: var(--amber); font-style: italic; }
+  .footer-row{ display:flex; flex-wrap:wrap; justify-content:space-between; align-items:flex-end; gap:26px; }
+  .footer-email{ font-family: var(--font-mono); font-size:14px; border-bottom:1px solid var(--hairline); padding-bottom:4px; }
+  .footer-links{ display:flex; gap:22px; }
+  .footer-links a{ font-size:13px; color: var(--muted); }
+  .footer-links a:hover{ color: var(--ink); }
+  .footer-fine{ margin-top:60px; display:flex; justify-content:space-between; color: var(--muted-2); font-family: var(--font-mono); font-size:11px; flex-wrap:wrap; gap:10px; }
+
+  /* ============================================
+     VIDEO MODAL
+     ============================================ */
+  .video-modal{
+    position: fixed; inset:0; z-index: 900;
+    display:flex; align-items:center; justify-content:center;
+    background: rgba(6,8,10,.86); backdrop-filter: blur(10px);
+    opacity:0; pointer-events:none; transition: opacity .35s var(--ease);
+    padding: 24px;
+  }
+  .video-modal.is-open{ opacity:1; pointer-events:auto; }
+  .video-modal-inner{
+    width:min(92vw, 960px); aspect-ratio:16/9; border-radius:var(--radius-lg);
+    background: var(--bg-elevated); border:1px solid var(--hairline);
+    display:flex; align-items:center; justify-content:center; position:relative;
+    transform: scale(.96); transition: transform .35s var(--ease);
+  }
+  .video-modal.is-open .video-modal-inner{ transform: scale(1); }
+  .video-modal-inner video{ width:100%; height:100%; border-radius: var(--radius-lg); }
+  .video-modal-frame{ width:100%; height:100%; border-radius: var(--radius-lg); border:0; }
+  .video-modal-note{ font-family: var(--font-mono); font-size:12.5px; color: var(--muted); text-align:center; padding: 0 20px; }
+  .video-modal-close{
+    position:absolute; top:-44px; right:0; font-family: var(--font-mono); font-size:12px;
+    color: var(--muted); border:1px solid var(--hairline); padding:8px 14px; border-radius:100px;
+    background:transparent;
+  }
+  .video-modal-close:hover{ color:var(--ink); border-color: var(--ink); }
+
+  @media (prefers-reduced-motion: reduce){
+    .line{ animation: none !important; }
+    html{ scroll-behavior:auto; }
+  }
+</style>
+</head>
+<body>
+
+<div class="grain" aria-hidden="true"></div>
+
+<!-- ============================================ NAV ============================================ -->
+<nav class="nav">
+  <a class="nav-brand" href="#top">
+    <svg class="nav-mark" viewBox="0 0 26 26" fill="none">
+      <circle cx="13" cy="13" r="12" stroke="#E8A33D" stroke-width="1.4"/>
+      <path d="M13 4 L13 22 M4 13 L22 13" stroke="#8A93A3" stroke-width="1" opacity=".5"/>
+      <path d="M9 16 L13 8 L17 16 Z" fill="#EDEFF2"/>
+    </svg>
+    <span class="nav-word">Map Motion Studio</span>
+  </a>
+  <div class="nav-links">
+    <div class="nav-links-inner">
+      <a href="#work">Work</a>
+      <a href="#about">About</a>
+      <a href="#contact">Contact</a>
+    </div>
+    <a class="nav-cta" href="#contact">Start a project →</a>
+  </div>
+</nav>
+
+<!-- ============================================ HERO ============================================ -->
+<section class="hero" id="top">
+  <div class="hero-pin" id="heroPin">
+    <div class="contour-bg" aria-hidden="true"></div>
+
+    <!-- NEW CURATED FLOATING FIELD (injected via JS) -->
+    <div class="cards-field" id="cardsField" aria-hidden="true"></div>
+
+    <!-- center content: 3 morphing states -->
+    <div class="hero-center">
+      <div class="state is-active" id="state1">
+        <p class="eyebrow">Geospatial storytelling <span class="dot">·</span> Broadcast motion design</p>
+        <h1 class="wordmark"><span class="w-map">Map</span> <span class="w-motion">Motion</span> <span class="w-studio">Studio</span></h1>
+        <p class="tagline">Cartography, set in motion. We turn terrain, data, and satellite imagery into sequences people actually want to watch.</p>
+      </div>
+
+      <div class="state" id="state2">
+        <p class="eyebrow">Showreel <span class="dot">·</span> Geospatial</p>
+        <button class="video-thumb tile-map-1" data-video="map" data-yt-id="olFdgFgHpbA" aria-label="Play the map showreel">
+          <img class="thumb-bg" src="https://img.youtube.com/vi/olFdgFgHpbA/maxresdefault.jpg" alt="Map Reel thumbnail" loading="lazy" onerror="this.onerror=null;this.src='https://img.youtube.com/vi/olFdgFgHpbA/hqdefault.jpg';">
+          <span class="play-icon">▶</span>
+          <span class="video-label">Map Reel — 2025</span>
+        </button>
+      </div>
+
+      <div class="state" id="state3">
+        <p class="eyebrow">Showreel <span class="dot">·</span> Motion design</p>
+        <button class="video-thumb tile-motion-1" data-video="motion" data-yt-id="_nEnBsgE8Qw" aria-label="Play the motion graphics showreel">
+          <img class="thumb-bg" src="https://img.youtube.com/vi/_nEnBsgE8Qw/maxresdefault.jpg" alt="Motion Reel thumbnail" loading="lazy" onerror="this.onerror=null;this.src='https://img.youtube.com/vi/_nEnBsgE8Qw/hqdefault.jpg';">
+          <span class="play-icon">▶</span>
+          <span class="video-label">Motion Reel — 2025</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- signature: scroll legend / radar gauge -->
+    <div class="legend" aria-hidden="true">
+      <div class="legend-track"><div class="scan-line" id="scanLine"></div></div>
+      <div class="legend-item is-active" data-legend="1"><span class="tick"></span>01 — Studio</div>
+      <div class="legend-item" data-legend="2"><span class="tick"></span>02 — Map reel</div>
+      <div class="legend-item" data-legend="3"><span class="tick"></span>03 — Motion reel</div>
+    </div>
+
+    <div class="coords-readout" aria-hidden="true"><span class="live-dot"></span>24.71°N · 121.53°E — scanning</div>
+
+    <div class="scroll-cue" id="scrollCue"><span>Scroll</span><span class="line"></span></div>
+  </div>
+</section>
+
+<!-- ============================================ WORK ============================================ -->
+<section class="section" id="work">
+  <div class="section-head">
+    <p class="eyebrow">Selected work</p>
+    <h2>Recent reels &amp; broadcast pieces.</h2>
+    <p>A mix of geospatial explainers and motion design work made for news desks, research teams, and product launches.</p>
+  </div>
+
+  <div class="filters" role="tablist" aria-label="Filter work by category">
+    <button class="filter-btn is-active" data-filter="all">All</button>
+    <button class="filter-btn" data-filter="map">Map</button>
+    <button class="filter-btn" data-filter="motion">Motion</button>
+  </div>
+
+  <div class="work-grid" id="workGrid">
+    <a class="work-card" data-cat="map" href="#" target="_blank" rel="noopener">
+      <div class="work-thumb tile-map-4"><div class="play-icon-sm"><span>▶</span></div></div>
+      <div class="work-meta"><p class="work-cat">Map</p><h3 class="work-title">Wildfire Spread — Western Ridge</h3><p class="work-client">Terra Insights</p></div>
+    </a>
+    <a class="work-card" data-cat="motion" href="#" target="_blank" rel="noopener">
+      <div class="work-thumb tile-motion-3"><div class="play-icon-sm"><span>▶</span></div></div>
+      <div class="work-meta"><p class="work-cat">Motion</p><h3 class="work-title">Continuum — Title Sequence</h3><p class="work-client">Nova Broadcasting</p></div>
+    </a>
+    <a class="work-card" data-cat="map" href="#" target="_blank" rel="noopener">
+      <div class="work-thumb tile-map-2"><div class="play-icon-sm"><span>▶</span></div></div>
+      <div class="work-meta"><p class="work-cat">Map</p><h3 class="work-title">Flood Extent — Rhine Basin</h3><p class="work-client">Meridian News</p></div>
+    </a>
+    <a class="work-card" data-cat="motion" href="#" target="_blank" rel="noopener">
+      <div class="work-thumb tile-motion-4"><div class="play-icon-sm"><span>▶</span></div></div>
+      <div class="work-meta"><p class="work-cat">Motion</p><h3 class="work-title">Orbit App — Explainer</h3><p class="work-client">Orbit Labs</p></div>
+    </a>
+    <a class="work-card" data-cat="map" href="#" target="_blank" rel="noopener">
+      <div class="work-thumb tile-map-3"><div class="play-icon-sm"><span>▶</span></div></div>
+      <div class="work-meta"><p class="work-cat">Map</p><h3 class="work-title">Urban Growth — Delta City</h3><p class="work-client">Atlas Planning Group</p></div>
+    </a>
+    <a class="work-card" data-cat="motion" href="#" target="_blank" rel="noopener">
+      <div class="work-thumb tile-motion-1"><div class="play-icon-sm"><span>▶</span></div></div>
+      <div class="work-meta"><p class="work-cat">Motion</p><h3 class="work-title">Brand Loop — Quarterly Reveal</h3><p class="work-client">Halcyon Co.</p></div>
+    </a>
+  </div>
+</section>
+
+<!-- ============================================ ABOUT ============================================ -->
+<section class="section" id="about">
+  <div class="about-grid">
+    <div class="about-copy">
+      <p class="eyebrow">Studio</p>
+      <h2 style="font-family:var(--font-display); font-weight:600; font-size:clamp(26px,3vw,36px); letter-spacing:-0.01em; margin:10px 0 24px;">Two crafts, one frame.</h2>
+      <p>Map Motion Studio sits at the intersection of geospatial storytelling and broadcast motion design. We turn raw data, terrain, and satellite imagery into sequences people actually want to watch — then bring the same craft to brand and title work.</p>
+      <p>Every project starts with the same question: what's the one thing this frame needs to say? Everything else gets cut.</p>
+    </div>
+    <ul class="services">
+      <li>Geospatial storytelling <span>DATA → FILM</span></li>
+      <li>Broadcast motion graphics <span>ON-AIR</span></li>
+      <li>Data visualization <span>CHARTS → SCENES</span></li>
+      <li>Title sequences &amp; brand animation <span>IDENT</span></li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============================================ FOOTER / CONTACT ============================================ -->
+<footer id="contact">
+  <h2 class="footer-cta">Have a story worth <em>mapping</em>?</h2>
+  <div class="footer-row">
+    <a class="footer-email" href="mailto:hello@mapmotion.studio">hello@mapmotion.studio</a>
+    <div class="footer-links">
+      <a href="#" target="_blank" rel="noopener">Instagram</a>
+      <a href="#" target="_blank" rel="noopener">YouTube</a>
+      <a href="#" target="_blank" rel="noopener">Behance</a>
+    </div>
+  </div>
+  <div class="footer-fine">
+    <span>© <span id="year"></span> Map Motion Studio</span>
+    <span>Built with data, patience, and a lot of scroll listeners.</span>
+  </div>
+</footer>
+
+<!-- ============================================ VIDEO MODAL ============================================ -->
+<div class="video-modal" id="videoModal" role="dialog" aria-modal="true" aria-hidden="true">
+  <div class="video-modal-inner">
+    <button class="video-modal-close" id="videoModalClose">Close ✕</button>
+    <iframe class="video-modal-frame" id="videoModalFrame" title="Reel player" src="" frameborder="0" referrerpolicy="strict-origin-when-cross-origin" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
+  </div>
+</div>
+
+<script>
+/* No external dependencies — plain HTML/CSS/JS throughout. */
+(function(){
+  document.getElementById('year').textContent = new Date().getFullYear();
+
+  var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---------------- video modal ---------------- */
+  var modal = document.getElementById('videoModal');
+  var modalFrame = document.getElementById('videoModalFrame');
+  document.querySelectorAll('[data-video]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var ytId = btn.getAttribute('data-yt-id');
+      if(!ytId) return;
+      modalFrame.src = 'https://www.youtube-nocookie.com/embed/' + ytId + '?autoplay=1&rel=0';
+      modal.classList.add('is-open');
+      modal.setAttribute('aria-hidden','false');
+    });
+  });
+  document.querySelectorAll('.work-card').forEach(function(card){
+    card.addEventListener('click', function(e){
+      if(card.getAttribute('href') === '#'){ e.preventDefault(); }
+    });
+  });
+  document.getElementById('videoModalClose').addEventListener('click', closeModal);
+  modal.addEventListener('click', function(e){ if(e.target === modal) closeModal(); });
+  document.addEventListener('keydown', function(e){ if(e.key === 'Escape') closeModal(); });
+  function closeModal(){
+    modal.classList.remove('is-open');
+    modal.setAttribute('aria-hidden','true');
+    modalFrame.src = ''; /* stop playback when closed */
+  }
+
+  /* ---------------- work filter ---------------- */
+  var filterBtns = document.querySelectorAll('.filter-btn');
+  filterBtns.forEach(function(btn){
+    btn.addEventListener('click', function(){
+      filterBtns.forEach(function(b){ b.classList.remove('is-active'); });
+      btn.classList.add('is-active');
+      var f = btn.getAttribute('data-filter');
+      document.querySelectorAll('.work-card').forEach(function(card){
+        var show = f === 'all' || card.getAttribute('data-cat') === f;
+        card.style.display = show ? '' : 'none';
+      });
+    });
+  });
+
+  /* ---------------- NEW CURATED FLOATING CARDS & PHYSICS PARALLAX ---------------- */
+  var fieldContainer = document.getElementById('cardsField');
+  var PLACEHOLDER_IMAGES = [
+    "https://images.unsplash.com/photo-1524661135-423995f22d0b?q=80&w=400&auto=format&fit=crop",
+    "https://images.unsplash.com/photo-1526778548025-fa2fbf8b1c0c?q=80&w=400&auto=format&fit=crop",
+    "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=400&auto=format&fit=crop",
+    "https://images.unsplash.com/photo-1582053433976-25c00369fc93?q=80&w=400&auto=format&fit=crop",
+    "https://images.unsplash.com/photo-1451187580459-43490279c0fa?q=80&w=400&auto=format&fit=crop"
+  ];
+
+  var isMobile = window.innerWidth < 768;
+
+  // Hand-curated positions to match reference image (decluttered, framing the center)
+  // x and y are viewport percentages from the exact center (0,0)
+  var baseCards = [
+    // Foreground / Midground (Sharp, clear, frames the text nicely)
+    { x: -28, y: -26, depth: 0.9, w: 240, h: 180, title: "Iran-Iraq Conflict Map", imgIdx: 0 },
+    { x: -2,  y: -34, depth: 0.8, w: 200, h: 260, title: "US-Mexico Border", imgIdx: 1 },
+    { x: 26,  y: -24, depth: 0.85, w: 250, h: 160, title: "Taiwan Strait Military", imgIdx: 2 },
+    { x: -30, y: 28,  depth: 0.95, w: 280, h: 190, title: "South China Sea Dispute", imgIdx: 3 },
+    { x: 4,   y: 35,  depth: 0.9, w: 290, h: 170, title: "DeepLayer Military Base", imgIdx: 4 },
+    { x: 34,  y: 18,  depth: 0.85, w: 220, h: 160, title: "Syria War Progression", imgIdx: 0 },
+    { x: 38,  y: -5,  depth: 0.6, w: 180, h: 130, title: "Operation Tactical", imgIdx: 1 },
+
+    // Background (Blurred, smaller, provides depth without clutter)
+    { x: -44, y: -5,  depth: 0.5, w: 190, h: 140, title: "Mountain Tunnel", imgIdx: 2 },
+    { x: -40, y: 12,  depth: 0.3, w: 160, h: 110, title: "Infrastructure Map", imgIdx: 3 },
+    { x: 46,  y: -32, depth: 0.35, w: 170, h: 120, title: "Global Intel", imgIdx: 4 },
+    { x: 42,  y: 40,  depth: 0.4, w: 200, h: 140, title: "Desert Strike Mission", imgIdx: 0 },
+    { x: -18, y: -12, depth: 0.2, w: 140, h: 100, title: "Data Viz Overlay", imgIdx: 1 },
+    { x: 18,  y: 15,  depth: 0.15, w: 130, h: 90, title: "Grid System Alpha", imgIdx: 2 }
+  ];
+
+  var cardsData = [];
+  
+  // Apply scaling for mobile devices so it doesn't overlap excessively
+  baseCards.forEach(function(c) {
+    var scale = isMobile ? 0.65 : 1;
+    cardsData.push({
+      x: c.x,
+      y: c.y,
+      depth: c.depth,
+      width: c.w * scale,
+      height: c.h * scale,
+      duration: 10 + Math.random() * 8, // subtle timing variations
+      delay: -(Math.random() * 20),
+      image: PLACEHOLDER_IMAGES[c.imgIdx],
+      title: c.title
+    });
+  });
+
+  // Sort so foreground cards render on top of background ones
+  cardsData.sort(function(a, b){ return a.depth - b.depth; });
+
+  // Inject cards into the DOM
+  var html = '';
+  var playIcon = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+
+  cardsData.forEach(function(card){
+    var blurAmount = card.depth < 0.4 ? 4 : card.depth < 0.7 ? 2 : 0;
+    var opacity = card.depth < 0.4 ? 0.4 : card.depth < 0.7 ? 0.7 : 1;
+    var zIndex = Math.round(card.depth * 100);
+
+    html += '<div class="parallax-wrapper" data-depth="'+card.depth+'" style="z-index:'+zIndex+'; margin-left:'+card.x+'vw; margin-top:'+card.y+'vh; transform:translate(-50%,-50%);">' +
+              '<div class="drifter" style="animation: drift '+card.duration+'s ease-in-out '+card.delay+'s infinite;">' +
+                '<div class="card-inner" style="width:'+card.width+'px; height:'+card.height+'px; filter:blur('+blurAmount+'px); opacity:'+opacity+';">' +
+                  '<div class="card-img-wrap">' +
+                    '<div class="card-badge">' + playIcon + ' GIF</div>' +
+                    '<img src="'+card.image+'" class="card-img" loading="lazy" alt="" />' +
+                    '<div class="card-inner-shadow"></div>' +
+                  '</div>' +
+                  '<div class="card-cap-bar">' +
+                    '<div class="card-title">'+card.title+'</div>' +
+                    '<div class="card-subtitle">by Map Motion</div>' +
+                  '</div>' +
+                '</div>' +
+              '</div>' +
+            '</div>';
+  });
+  fieldContainer.innerHTML = html;
+
+  // Smooth Mouse Parallax Physics loop
+  var mouseX = 0, mouseY = 0, currentX = 0, currentY = 0;
+  var parallaxElements = document.querySelectorAll('.parallax-wrapper');
+  
+  if (!reduceMotion && window.matchMedia('(min-width: 721px)').matches) {
+    window.addEventListener('mousemove', function(e){
+      mouseX = (e.clientX / window.innerWidth) - 0.5;
+      mouseY = (e.clientY / window.innerHeight) - 0.5;
+    });
+
+    function animateParallax() {
+      currentX += (mouseX - currentX) * 0.05; 
+      currentY += (mouseY - currentY) * 0.05;
+
+      parallaxElements.forEach(function(el){
+        var depth = parseFloat(el.getAttribute('data-depth'));
+        var xMove = currentX * depth * 120; 
+        var yMove = currentY * depth * 120;
+        el.style.transform = 'translate(calc(-50% + ' + xMove + 'px), calc(-50% + ' + yMove + 'px))';
+      });
+
+      requestAnimationFrame(animateParallax);
+    }
+    animateParallax();
+  }
+
+  /* ---------------- scroll-driven hero morph (vanilla, no scroll libraries) ---------------- */
+  var heroSection = document.querySelector('.hero');
+  var states = { 1: document.getElementById('state1'), 2: document.getElementById('state2'), 3: document.getElementById('state3') };
+  var legendItems = document.querySelectorAll('.legend-item');
+  var scanLine = document.getElementById('scanLine');
+  var scrollCue = document.getElementById('scrollCue');
+  var currentActive = 1;
+
+  function setActiveState(n){
+    if(n === currentActive) return;
+    currentActive = n;
+    Object.keys(states).forEach(function(k){
+      states[k].classList.toggle('is-active', Number(k) === n);
+    });
+    legendItems.forEach(function(li){
+      li.classList.toggle('is-active', Number(li.getAttribute('data-legend')) === n);
+    });
+
+    // Fade and blur floating cards on scroll (pushes them to background)
+    if (n === 1) {
+      fieldContainer.classList.remove('is-dulled');
+    } else {
+      fieldContainer.classList.add('is-dulled');
+    }
+  }
+
+  var rafScheduled = false;
+  function updateScroll(){
+    rafScheduled = false;
+    var rect = heroSection.getBoundingClientRect();
+    var scrollable = rect.height - window.innerHeight;
+    var p = scrollable > 0 ? (-rect.top) / scrollable : 0;
+    p = Math.min(1, Math.max(0, p));
+
+    scanLine.style.top = (p * 100) + '%';
+    scrollCue.style.opacity = Math.max(0, 1 - p * 6);
+
+    if(p < 0.30){ setActiveState(1); }
+    else if(p < 0.63){ setActiveState(2); }
+    else { setActiveState(3); }
+  }
+
+  function onScroll(){
+    if(!rafScheduled){
+      rafScheduled = true;
+      window.requestAnimationFrame(updateScroll);
+    }
+  }
+
+  window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('resize', onScroll);
+  updateScroll();
+})();
+</script>
+
+</body>
+</html>
